@@ -1,209 +1,329 @@
 ---
-title: TiDB Sysbench 性能测试报告 - v1.0.0
+title:阿里云服务器 Sysbench 基准测试报告 - v1.0.0
 category: benchmark
 draft: true
 ---
 
-# TiDB Sysbench 性能测试报告 - v1.0.0
+# 阿里云服务器 Sysbench 基准测试报告 - v1.0.0
 
 ## 测试目的
 
-测试 TiDB 在 OLTP 场景下的性能以及水平扩展能力。
+测试阿里云服务器CPU性能,磁盘IO,线程调度器,互斥锁,内存,数据库等性能。
 
 > **注意**: 不同的测试环境可能使测试结果发生改变。
 
 ## 测试版本、时间、地点
-
-TiDB 版本：v1.0.0 
-时间：2017 年 10 月 20 日
-地点：北京
+MySQL 版本：5.7.21-log MySQL Community Server (GPL)   
+时间：2019 年 4 月 24 日  
+地点：杭州
 
 ## 测试环境
 
-IDC 机器
+阿里云主机
 
 | 类别       |  名称       |
 | :--------: | :---------: |
-| OS       | linux (CentOS 7.3.1611)       |
-| CPU | 40 vCPUs, Intel(R) Xeon(R) CPU E5-2630 v4 @ 2.20GHz |
-| RAM | 128GB |
-| DISK | 1.5T SSD * 2  + Optane SSD * 1 |
+| OS       | CentOS 7.3 64Bit       |
+| CPU | 16核 , Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz |
+| RAM | 64GB |
+| DISK | 53.7 GB + 1073.7 GB |
 
-Sysbench 版本: 1.0.6
+Sysbench 版本: 1.1.0
 
-测试脚本: https://github.com/pingcap/tidb-bench/tree/cwen/not_prepared_statement/sysbench
+## １、CPU性能测试
+### 测试说明
+```
+通过求得15000以内的最大素数,测试单核cpu计算能力
+```
 
-## 测试方案
+### 测试脚本
+```shell 
+sysbench --cpu-max-prime=15000 cpu run 
+```
 
-### 场景一：sysbench 标准性能测试
+### 测试结果
+```
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
 
-测试表结构
+
+Prime numbers limit: 15000
+
+Initializing worker threads...
+
+Threads started!
+
+CPU speed:
+    events per second:   442.86
+
+Throughput:
+    events/s (eps):                      442.8586
+    time elapsed:                        10.0009s
+    total number of events:              4429
+
+Latency (ms):
+         min:                                    2.25
+         avg:                                    2.26
+         max:                                    2.49
+         95th percentile:                        2.26
+         sum:                                 9996.41
+
+Threads fairness:
+    events (avg/stddev):           4429.0000/0.00
+    execution time (avg/stddev):   9.9964/0.00
+```
+  **重点看：**
+```
+Latency avg: 2.26ms(平均执行时间越少越好)
+```
+## 2、磁盘IO性能测试
+### 测试说明
+```
+通过生成128个64M磁盘文件，然后随机读写，测试磁盘随机读写性能
+```
+### 测试脚本
+```shell 
+//在当前目录生成128个16M文件
+sysbench fileio prepare
+//随机读写测试文件
+sysbench fileio --file-test-mode=rndrw run
+//清空测试文件
+sysbench fileio cleanup
+```
+
+### 测试结果
 
 ``` 
-CREATE TABLE `sbtest` (
-  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-  `k` int(10) unsigned NOT NULL DEFAULT '0',
-  `c` char(120) NOT NULL DEFAULT '',
-  `pad` char(60) NOT NULL DEFAULT '',
-  PRIMARY KEY (`id`),
-  KEY `k_1` (`k`)
-) ENGINE=InnoDB  
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
+
+
+Extra file open flags: (none)
+128 files, 16MiB each
+2GiB total file size
+Block size 16KiB
+Number of IO requests: 0
+Read/Write ratio for combined random IO test: 1.50
+Periodic FSYNC enabled, calling fsync() each 100 requests.
+Calling fsync() at the end of test, Enabled.
+Using synchronous I/O mode
+Doing random r/w test
+Initializing worker threads...
+
+Threads started!
+
+
+Throughput:
+         read:  IOPS=1857.00 29.02 MiB/s (30.43 MB/s)
+         write: IOPS=1238.00 19.34 MiB/s (20.28 MB/s)
+         fsync: IOPS=3968.59
+
+Latency (ms):
+         min:                                  0.00
+         avg:                                  0.14
+         max:                                 38.67
+         95th percentile:                      0.40
+         sum:                               9921.26
 ```
-
-部署方案以及配置参数
-
+  **重点看：**
+```
+Throughput read: 29.02 MiB/s
+Throughput write: 19.34 MiB/s
+```
+## 3、线程性能测试
+### 测试说明
 ``` 
-// TiDB 部署方案
-172.16.20.4    4*tikv    1*tidb    1*sysbench
-172.16.20.6    4*tikv    1*tidb    1*sysbench
-172.16.20.7    4*tikv    1*tidb    1*sysbench
-172.16.10.8    1*tidb    1*pd      1*sysbench  
+测试线程调度器的性能，对于高负载情况下测试线程调度器的行为非常有用
+```
+### 测试脚本
+```shell 
+sysbench --threads=64 threads run
+```
+### 测试结果
+``` 
+Running the test with following options:
+Number of threads: 64
+Initializing random number generator from current time
 
-// 每个物理节点有三块盘：
-data3: 2 tikv  (Optane SSD)
-data2: 1 tikv
-data1: 1 tikv
 
-// TiKV 参数配置
-sync-log = false
-grpc-concurrency = 8
-grpc-raft-conn-num = 24
-[defaultcf]
-block-cache-size = "12GB"
-[writecf]
-block-cache-size = "5GB"
-[raftdb.defaultcf]
-block-cache-size = "2GB"
+Initializing worker threads...
 
-// Mysql 部署方案
-// 分别使用半同步复制和异步复制，部署两副本
-172.16.20.4    master
-172.16.20.6    slave
-172.16.20.7    slave
-172.16.10.8    1*sysbench
-Mysql version: 5.6.37
+Threads started!
 
-// Mysql 参数配置
-thread_cache_size = 64
-innodb_buffer_pool_size = 64G
-innodb_file_per_table = 1
-innodb_flush_log_at_trx_commit = 0  
-datadir = /data3/mysql  
-max_connections = 2000
+
+Throughput:
+    events/s (eps):                      3260.2227
+    time elapsed:                        10.0775s
+    total number of events:              32855
+
+Latency (ms):
+         min:                                    0.28
+         avg:                                   19.58
+         max:                                  219.03
+         95th percentile:                      153.02
+         sum:                               643441.83
+
+Threads fairness:
+    events (avg/stddev):           513.3594/41.76
+    execution time (avg/stddev):   10.0538/0.02
+``` 
+  **重点看：**
+```
+Throughput events/s (eps): 3260.2227(吞吐量越大越好)
+Latency avg: 19.58ms(平均执行时间越少越好)
 ```
 
-* 标准 oltp 测试
 
-| - | table count | table size | sysbench threads | tps | qps | latency(avg / .95) |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| TiDB | 32 | 100 万 | 64 * 4 | 3834 | 76692 | 67.04 ms / 110.88 ms |
-| TiDB | 32 | 100 万 | 128 * 4 | 4172 | 83459 | 124.00 ms / 194.21 ms  |
-| TiDB | 32 | 100 万 | 256 * 4 | 4577 | 91547 | 228.36 ms / 334.02 ms |
-| TiDB | 32 | 500 万 | 256 * 4 | 4032 | 80657 | 256.62 ms / 443.88 ms |
-| TiDB | 32 | 1000 万 | 256 * 4 | 3811 | 76233 | 269.46 ms / 505.20 ms |
-| Mysql | 32 | 100 万 | 64 | 2392 | 47845 | 26.75 ms / 73.13 ms |
-| Mysql | 32 | 100 万 | 128 | 2493 | 49874 | 51.32 ms / 173.58 ms  |
-| Mysql | 32 | 100 万 | 256 | 2561 | 51221 | 99.95 ms  / 287.38 ms |
-| Mysql | 32 | 500 万 | 256 | 1902 | 38045 | 134.56 ms / 363.18 ms |
-| Mysql | 32 | 1000 万 | 256 | 1770 | 35416 | 144.55 ms / 383.33 ms  |
-
-![](http://7xnp02.com1.z0.glb.clouddn.com/threads_oltp.png?imageView2/2/w/700/q/75|imageslim)    
-
-![](http://7xnp02.com1.z0.glb.clouddn.com/table_size_oltp.png?imageView2/2/w/700/q/75|imageslim)
-
-* 标准 select 测试
-
-| - | table count | table size | sysbench threads |qps | latency(avg / .95) |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| TiDB | 32 | 100 万 | 64 * 4 |  160299 | 1.61ms / 50.06 ms |
-| TiDB | 32 | 100 万 | 128 * 4 | 183347 | 2.85 ms / 8.66 ms  |
-| TiDB | 32 | 100 万 | 256 * 4 |  196515 | 5.42 ms / 14.43 ms |
-| TiDB | 32 | 500 万 | 256 * 4 |  187628 | 5.66 ms / 15.04 ms |
-| TiDB | 32 | 1000 万 | 256 * 4 |  187440 | 5.65 ms / 15.37 ms  |
-| Mysql | 32 | 100 万 | 64 |  359572 | 0.18 ms /  0.45 ms  |
-| Mysql | 32 | 100 万 | 128 |  410426  |0.31 ms / 0.74 ms  |
-| Mysql | 32 | 100 万 | 256 |  396867 | 0.64 ms / 1.58 ms  |
-| Mysql | 32 | 500 万 | 256 |  386866 | 0.66 ms / 1.64 ms |
-| Mysql | 32 | 1000 万 | 256 |  388273 | 0.66 ms / 1.64 ms  |
-
-![](http://7xnp02.com1.z0.glb.clouddn.com/threads_select.png?imageView2/2/w/700/q/75|imageslim) 
-
-![](http://7xnp02.com1.z0.glb.clouddn.com/table_size_select.png?imageView2/2/w/700/q/75|imageslim) 
-
-* 标准 insert 测试
-
-| - | table count | table size | sysbench threads | qps | latency(avg / .95) |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| TiDB | 32 | 100 万 | 64 * 4 | 25308 | 10.12 ms / 25.40 ms |
-| TiDB | 32 | 100 万 | 128 * 4 | 28773 | 17.80 ms / 44.58 ms   |
-| TiDB | 32 | 100 万 | 256 * 4 | 32641 | 31.38 ms / 73.47 ms |
-| TiDB | 32 | 500 万 | 256 * 4 | 30430 | 33.65 ms / 79.32 ms |
-| TiDB | 32 | 1000 万 | 256 * 4 | 28925 | 35.41 ms / 78.96 ms |
-| Mysql | 32 | 100 万 | 64 | 14806 | 4.32 ms / 9.39 ms |
-| Mysql | 32 | 100 万 | 128 | 14884 | 8.58  ms / 21.11 ms |
-| Mysql | 32 | 100 万 | 256 | 14508 | 17.64 ms / 44.98 ms  |
-| Mysql | 32 | 500 万 | 256 | 10593 | 24.16 ms / 82.96 ms  |
-| Mysql | 32 | 1000 万 | 256 | 9813 | 26.08 ms / 94.10 ms  |
- 
-![](http://7xnp02.com1.z0.glb.clouddn.com/threads_insert.png?imageView2/2/w/700/q/75|imageslim)
-
-![](http://7xnp02.com1.z0.glb.clouddn.com/table_size_insert.png?imageView2/2/w/700/q/75|imageslim)   
+## 4、互斥锁(mutex)
+* 测试说明
+``` 
+测试互斥锁的性能，方式是模拟所有线程在同一时刻并发运行，并都短暂请求互斥锁
+```
+* 测试脚本
+```shell 
+sysbench --threads=16 --mutex-num=2048 --mutex-locks=1000000 --mutex-loops=5000 mutex run
+```
+* 测试结果
+``` 
+Running the test with following options:
+Number of threads: 16
+Initializing random number generator from current time
 
 
-### 场景二：TiDB 水平扩展能力测试
+Initializing worker threads...
 
-部署方案以及配置参数
+Threads started!
+
+
+Throughput:
+    events/s (eps):                      4.7606
+    time elapsed:                        3.3609s
+    total number of events:              16
+
+Latency (ms):
+         min:                                 2306.46
+         avg:                                 2785.90
+         max:                                 3356.01
+         95th percentile:                     3151.62
+         sum:                                44574.45
+
+Threads fairness:
+    events (avg/stddev):           1.0000/0.00
+    execution time (avg/stddev):   2.7859/0.30
+``` 
+  **重点看：**
+```
+Latency avg: 19.58ms
+Threads fairness execution time  (avg): 2.7859
+```
+## 5、内存测试
+### 测试说明
+``` 
+测试内存读写速度
+```
+### 测试脚本
+``` 
+sysbench --memory-block-size=8K --memory-total-size=2G --threads=16 memory run
+```
+### 测试结果
+``` 
+Running the test with following options:
+Number of threads: 16
+Initializing random number generator from current time
+
+
+Running memory speed test with the following options:
+  block size: 8KiB
+  total size: 2048MiB
+  operation: write
+  scope: global
+
+Initializing worker threads...
+
+Threads started!
+
+Total operations: 262144 (935770.17 per second)
+
+2048.00 MiB transferred (7310.70 MiB/sec)
+
+
+Throughput:
+    events/s (eps):                      935770.1744
+    time elapsed:                        0.2801s
+    total number of events:              262144
+
+Latency (ms):
+         min:                                    0.00
+         avg:                                    0.01
+         max:                                    9.11
+         95th percentile:                        0.02
+         sum:                                 3726.24
+
+Threads fairness:
+    events (avg/stddev):           16384.0000/0.00
+    execution time (avg/stddev):   0.2329/0.01
+``` 
+  **重点看：**
+```
+Total operations: 262144 (935770.17 per second)
+2048.00 MiB transferred (7310.70 MiB/sec)
+```
+## 6、MySQL数据库测试OLTP
+### 测试说明
+``` 
+测试数据库读写性能
+```
+### 测试脚本
+```
+//生成20万条数据，数据库名：test_wjl，数据库用户：root，密码：123456
+sysbench /usr/local/share/sysbench/oltp_read_write.lua --table-size=200000 --db-driver=mysql --mysql-socket=/opt/mysqldata/mysql.sock --mysql-user=root --mysql-password=123456 --mysql-db=test_wjl prepare
+//测试读写
+sysbench /usr/local/share/sysbench/oltp_read_write.lua --table-size=200000 --db-driver=mysql --mysql-socket=/opt/mysqldata/mysql.sock --mysql-user=root --mysql-password=123456 --mysql-db=test_wjl run
+//清除测试表
+sysbench /usr/local/share/sysbench/oltp_read_write.lua --table-size=200000 --db-driver=mysql --mysql-socket=/opt/mysqldata/mysql.sock --mysql-user=root --mysql-password=123456 --mysql-db=test_wjl cleanup
 
 ```
-// TiDB 部署方案
-172.16.20.3    4*tikv
-172.16.10.2    1*tidb    1*pd     1*sysbench
+### 测试结果
+``` 
+Running the test with following options:
+Number of threads: 1
+Initializing random number generator from current time
 
-每个物理节点有三块盘：
-data3: 2 tikv  (Optane SSD)
-data2: 1 tikv
-data1: 1 tikv
 
-// TiKV 参数配置
-sync-log = false
-grpc-concurrency = 8
-grpc-raft-conn-num = 24
-[defaultcf]
-block-cache-size = "12GB"
-[writecf]
-block-cache-size = "5GB"
-[raftdb.defaultcf]
-block-cache-size = "2GB"
+Initializing worker threads...
+
+Threads started!
+
+SQL statistics:
+    queries performed:
+        read:                            47292
+        write:                           13512
+        other:                           6756
+        total:                           67560
+    transactions:                        3378   (337.78 per sec.)
+    queries:                             67560  (6755.56 per sec.)
+    ignored errors:                      0      (0.00 per sec.)
+    reconnects:                          0      (0.00 per sec.)
+
+Throughput:
+    events/s (eps):                      337.7782
+    time elapsed:                        10.0006s
+    total number of events:              3378
+
+Latency (ms):
+         min:                                    2.65
+         avg:                                    2.96
+         max:                                   26.72
+         95th percentile:                        3.25
+         sum:                                 9992.44
+
+Threads fairness:
+    events (avg/stddev):           3378.0000/0.00
+    execution time (avg/stddev):   9.9924/0.00
+``` 
+  **重点看：**
 ```
-
-* 标准 oltp 测试
-
-| - | table count | table size | sysbench threads | tps | qps | latency(avg / .95) |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 1 物理节点 TiDB | 32 | 100 万 | 256 * 1 | 2495 | 49902 | 102.42 ms / 125.52 ms |
-| 2 物理节点 TiDB | 32 | 100 万 | 256 * 2 | 5007 | 100153 | 102.23 ms / 125.52 ms  |
-| 4 物理节点 TiDB | 32 | 100 万 | 256 * 4 | 8984 | 179692 | 114.96 ms / 176.73 ms |
-| 6 物理节点 TiDB | 32 | 500 万 | 256 * 6 | 12953 | 259072 | 117.80 ms / 200.47 ms  |
-
-![](http://7xnp02.com1.z0.glb.clouddn.com/scale_tidb_oltp.png?imageView2/2/w/700/q/75|imageslim)
-
-* 标准 select 测试
-
-| - | table count | table size | sysbench threads | qps | latency(avg / .95) |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| 1 物理节点 TiDB | 32 | 100 万 | 256 * 1 | 71841 | 3.56 ms / 8.74 ms |
-| 2 物理节点 TiDB | 32 | 100 万 | 256 * 2 | 146615 | 3.49 ms / 8.74 ms |
-| 4 物理节点 TiDB | 32 | 100 万 | 256 * 4 | 289933 | 3.53 ms / 8.74 ms  |
-| 6 物理节点 TiDB | 32 | 500 万 | 256 * 6 | 435313 | 3.55 ms / 9.17 ms  |
-
-![](http://7xnp02.com1.z0.glb.clouddn.com/scale_tidb_select.png?imageView2/2/w/700/q/75|imageslim)
-
-* 标准 insert 测试
-
-| - | table count | table size | sysbench threads | qps | latency(avg / .95) |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| 3 物理节点 TiKV | 32 | 100 万 |256 * 3 | 40547 | 18.93 ms / 38.25 ms |
-| 5 物理节点 TiKV | 32 | 100 万 | 256 * 3 | 60689 | 37.96 ms / 29.9 ms |
-| 7 物理节点 TiKV | 32 | 100 万 | 256 * 3 | 80087 | 9.62 ms / 21.37 ms |
-
-![](http://7xnp02.com1.z0.glb.clouddn.com/scale_tikv_insert.png?imageView2/2/w/700/q/75|imageslim)
+transactions: 3378
+```
